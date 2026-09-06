@@ -14,7 +14,12 @@ from PIL import Image
 
 # --- APP SETTINGS ---
 ctk.set_appearance_mode("dark")
-ctk.set_default_color_theme("green") # Blue, Green, Dark-Blue
+ctk.set_default_color_theme("green")
+
+def sanitize_filename(name):
+    """Removes characters that Windows doesn't allow in file names."""
+    clean = "".join(c for c in name if c not in r'\/:*?"<>|').strip()
+    return clean if clean else "generated_chart"
 
 class BFSApp(ctk.CTk):
     def __init__(self):
@@ -88,7 +93,7 @@ class BFSApp(ctk.CTk):
         os.makedirs("bfs", exist_ok=True)
 
         try:
-            # 1. Download
+            # 1. Download + Grab the Song Title
             self.update_status("1/4: Downloading audio from YouTube...", "#00d4ff")
             self.progress_bar.set(0.1)
 
@@ -98,7 +103,12 @@ class BFSApp(ctk.CTk):
                 'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '192'}],
             }
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                ydl.download([url])
+                info = ydl.extract_info(url, download=True)
+                raw_title = info.get('title', 'Unknown Title')
+                uploader = info.get('uploader', 'Unknown Artist')
+
+            # Clean the title so it's safe for Windows file names
+            song_title = sanitize_filename(raw_title)
 
             audio_path = next((f for f in os.listdir(temp_dir) if f.endswith('.mp3')), None)
             if not audio_path: raise Exception("Audio download failed.")
@@ -115,7 +125,7 @@ class BFSApp(ctk.CTk):
             onset_times = librosa.frames_to_time(onset_frames, sr=sr)
             onset_beats = (onset_times / 60.0) * bpm
 
-            # 3. Build Chart & Obstacles
+            # 3. Build Chart, Obstacles & Themes
             self.update_status("3/4: Adding smart obstacles & themes...", "#00d4ff")
             self.progress_bar.set(0.7)
 
@@ -133,7 +143,12 @@ class BFSApp(ctk.CTk):
             for moment in intense[:15]:
                 entities.append({"beat": round(moment["beat"], 4), "key": random.randint(5, 9), "datamodel": "custom_custom_spawn_cube/spawn_sting", "width": 0.25, "volume": 100})
 
+            # Add City Themes & End Marker
             last_beat = max(onset_beats) if len(onset_beats) > 0 else 100
+            entities.append({"beat": 0.0, "key": 1, "datamodel": "custom_themes/city_cold_night_theme", "width": 0.25, "volume": 100})
+            entities.append({"beat": round(last_beat * 0.25, 4), "key": 1, "datamodel": "custom_themes/city_blue_theme", "width": 0.25, "volume": 100})
+            entities.append({"beat": round(last_beat * 0.60, 4), "key": 1, "datamodel": "custom_themes/city_red_night_theme", "width": 0.25, "volume": 100})
+            entities.append({"beat": round(last_beat * 0.85, 4), "key": 1, "datamodel": "custom_themes/city_gold_theme", "width": 0.25, "volume": 100})
             entities.append({"beat": round(last_beat, 4), "key": 5, "datamodel": "custom_song_structure_gameplay/end", "width": 0.25, "volume": 100})
             entities.sort(key=lambda x: x["beat"])
 
@@ -141,15 +156,22 @@ class BFSApp(ctk.CTk):
                 "musicData": {"filename": "", "bpm": round(bpm, 2), "runBeats": 0.0},
                 "entities": entities,
                 "editorMeta": {"axisMap": [1,0,0,0,0,0,0,0,0,0], "datamodelTypes": [], "songStructure": {"version": "v2", "mode": "gameplay_compact", "source": "Local_App"}},
-                "bfsMetadata": {"songName": "Local Gen", "artist": "Unknown", "author": "Local", "difficulty": "Medium", "genre": "AI", "description": f"Generated from {url}", "coverFileName": "cover.webp"}
+                "bfsMetadata": {
+                    "songName": raw_title,          # Real title shows up in-game!
+                    "artist": uploader,             # YouTube channel name as artist
+                    "author": "Local AI Generator",
+                    "difficulty": "Medium",
+                    "genre": "AI",
+                    "description": f"Generated from {url}",
+                    "coverFileName": "cover.webp"
+                }
             }
 
-            # 4. Package and Save to 'bfs' folder
+            # 4. Package and Save with the Song Title
             self.update_status("4/4: Packaging .bfs file...", "#00d4ff")
             self.progress_bar.set(0.9)
 
-            # Save directly into the bfs folder
-            output_bfs = os.path.join("bfs", "generated_chart.bfs")
+            output_bfs = os.path.join("bfs", f"{song_title}.bfs")
 
             with zipfile.ZipFile(output_bfs, 'w', zipfile.ZIP_DEFLATED) as zf:
                 zf.writestr("chart.json", json.dumps(final_chart, indent=2))
