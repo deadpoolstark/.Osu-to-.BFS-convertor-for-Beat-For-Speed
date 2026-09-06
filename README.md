@@ -42,7 +42,9 @@ Because this uses a massive AI model, your PC needs to meet these requirements:
 python app-V-Mapperatorinator.py
 ``` 
 for running it on Mapperatorinator(Osu->bsr conversion+1st run takes a while)
+   
    **or**
+   
    ```bash
    python app-V-Librosa
    ```
