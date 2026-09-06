@@ -80,94 +80,95 @@ class BFSApp(ctk.CTk):
         thread = threading.Thread(target=self.run_pipeline, args=(url,))
         thread.start()
 
-        def run_pipeline(self, url):
-            temp_dir = "temp_app_data"
-            os.makedirs(temp_dir, exist_ok=True)
+    def run_pipeline(self, url):
+        temp_dir = "temp_app_data"
+        os.makedirs(temp_dir, exist_ok=True)
 
-            # Create the 'bfs' folder to store the final files
-            os.makedirs("bfs", exist_ok=True)
+        # Create the 'bfs' folder to store the final files
+        os.makedirs("bfs", exist_ok=True)
 
-            try:
-                # 1. Download
-                self.update_status("1/4: Downloading audio from YouTube...", "#00d4ff")
-                self.progress_bar.set(0.1)
+        try:
+            # 1. Download
+            self.update_status("1/4: Downloading audio from YouTube...", "#00d4ff")
+            self.progress_bar.set(0.1)
 
-                ydl_opts = {
-                    'format': 'bestaudio/best',
-                    'outtmpl': f'{temp_dir}/audio.%(ext)s',
-                    'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '192'}],
-                }
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    ydl.download([url])
+            ydl_opts = {
+                'format': 'bestaudio/best',
+                'outtmpl': f'{temp_dir}/audio.%(ext)s',
+                'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '192'}],
+            }
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                ydl.download([url])
 
-                audio_path = next((f for f in os.listdir(temp_dir) if f.endswith('.mp3')), None)
-                if not audio_path: raise Exception("Audio download failed.")
-                audio_path = os.path.join(temp_dir, audio_path)
+            audio_path = next((f for f in os.listdir(temp_dir) if f.endswith('.mp3')), None)
+            if not audio_path: raise Exception("Audio download failed.")
+            audio_path = os.path.join(temp_dir, audio_path)
 
-                # 2. AI Generation (Lightweight Librosa)
-                self.update_status("2/4: Analyzing audio & generating AI notes...", "#00d4ff")
-                self.progress_bar.set(0.4)
+            # 2. AI Generation (Lightweight Librosa)
+            self.update_status("2/4: Analyzing audio & generating AI notes...", "#00d4ff")
+            self.progress_bar.set(0.4)
 
-                y, sr = librosa.load(audio_path, sr=22050)
-                tempo, _ = librosa.beat.beat_track(y=y, sr=sr)
-                bpm = float(np.array(tempo).flatten()[0])
-                onset_frames = librosa.onset.onset_detect(y=y, sr=sr, backtrack=True)
-                onset_times = librosa.frames_to_time(onset_frames, sr=sr)
-                onset_beats = (onset_times / 60.0) * bpm
+            y, sr = librosa.load(audio_path, sr=22050)
+            tempo, _ = librosa.beat.beat_track(y=y, sr=sr)
+            bpm = float(np.array(tempo).flatten()[0])
+            onset_frames = librosa.onset.onset_detect(y=y, sr=sr, backtrack=True)
+            onset_times = librosa.frames_to_time(onset_frames, sr=sr)
+            onset_beats = (onset_times / 60.0) * bpm
 
-                # 3. Build Chart & Obstacles
-                self.update_status("3/4: Adding smart obstacles & themes...", "#00d4ff")
-                self.progress_bar.set(0.7)
+            # 3. Build Chart & Obstacles
+            self.update_status("3/4: Adding smart obstacles & themes...", "#00d4ff")
+            self.progress_bar.set(0.7)
 
-                entities = [{"beat": 0.0, "key": 5, "datamodel": "custom_song_structure_gameplay/g00_s00_intro", "width": 0.25, "volume": 100}]
-                for beat in onset_beats:
-                    humanized_beat = round(float(beat) + np.random.uniform(-0.02, 0.02), 4)
-                    chosen_key = int(np.random.choice([5, 6, 7, 8, 9]))
-                    entities.append({"beat": humanized_beat, "key": chosen_key, "datamodel": "custom_custom_spawn_cube/spawn_cube", "width": 0.25, "volume": 100})
+            entities = [{"beat": 0.0, "key": 5, "datamodel": "custom_song_structure_gameplay/g00_s00_intro", "width": 0.25, "volume": 100}]
+            for beat in onset_beats:
+                humanized_beat = round(float(beat) + np.random.uniform(-0.02, 0.02), 4)
+                chosen_key = int(np.random.choice([5, 6, 7, 8, 9]))
+                entities.append({"beat": humanized_beat, "key": chosen_key, "datamodel": "custom_custom_spawn_cube/spawn_cube", "width": 0.25, "volume": 100})
 
-                # Add 15 smart obstacles
-                time_gaps = [onset_beats[i] - onset_beats[i-1] for i in range(1, len(onset_beats))]
-                avg_gap = sum(time_gaps) / len(time_gaps) if time_gaps else 1
-                intense = [{"beat": onset_beats[i], "intensity": avg_gap / (onset_beats[i] - onset_beats[i-1])} for i in range(1, len(onset_beats)) if (onset_beats[i] - onset_beats[i-1]) < (avg_gap * 0.7)]
-                intense.sort(key=lambda x: x["intensity"], reverse=True)
-                for moment in intense[:15]:
-                    entities.append({"beat": round(moment["beat"], 4), "key": random.randint(5, 9), "datamodel": "custom_custom_spawn_cube/spawn_sting", "width": 0.25, "volume": 100})
+            # Add 15 smart obstacles
+            time_gaps = [onset_beats[i] - onset_beats[i-1] for i in range(1, len(onset_beats))]
+            avg_gap = sum(time_gaps) / len(time_gaps) if time_gaps else 1
+            intense = [{"beat": onset_beats[i], "intensity": avg_gap / (onset_beats[i] - onset_beats[i-1])} for i in range(1, len(onset_beats)) if (onset_beats[i] - onset_beats[i-1]) < (avg_gap * 0.7)]
+            intense.sort(key=lambda x: x["intensity"], reverse=True)
+            for moment in intense[:15]:
+                entities.append({"beat": round(moment["beat"], 4), "key": random.randint(5, 9), "datamodel": "custom_custom_spawn_cube/spawn_sting", "width": 0.25, "volume": 100})
 
-                last_beat = max(onset_beats) if len(onset_beats) > 0 else 100
-                entities.append({"beat": round(last_beat, 4), "key": 5, "datamodel": "custom_song_structure_gameplay/end", "width": 0.25, "volume": 100})
-                entities.sort(key=lambda x: x["beat"])
+            last_beat = max(onset_beats) if len(onset_beats) > 0 else 100
+            entities.append({"beat": round(last_beat, 4), "key": 5, "datamodel": "custom_song_structure_gameplay/end", "width": 0.25, "volume": 100})
+            entities.sort(key=lambda x: x["beat"])
 
-                final_chart = {
-                    "musicData": {"filename": "", "bpm": round(bpm, 2), "runBeats": 0.0},
-                    "entities": entities,
-                    "editorMeta": {"axisMap": [1,0,0,0,0,0,0,0,0,0], "datamodelTypes": [], "songStructure": {"version": "v2", "mode": "gameplay_compact", "source": "Local_App"}},
-                    "bfsMetadata": {"songName": "Local Gen", "artist": "Unknown", "author": "Local", "difficulty": "Medium", "genre": "AI", "description": f"Generated from {url}", "coverFileName": "cover.webp"}
-                }
+            final_chart = {
+                "musicData": {"filename": "", "bpm": round(bpm, 2), "runBeats": 0.0},
+                "entities": entities,
+                "editorMeta": {"axisMap": [1,0,0,0,0,0,0,0,0,0], "datamodelTypes": [], "songStructure": {"version": "v2", "mode": "gameplay_compact", "source": "Local_App"}},
+                "bfsMetadata": {"songName": "Local Gen", "artist": "Unknown", "author": "Local", "difficulty": "Medium", "genre": "AI", "description": f"Generated from {url}", "coverFileName": "cover.webp"}
+            }
 
-                # 4. Package and Save to 'bfs' folder
-                self.update_status("4/4: Packaging .bfs file...", "#00d4ff")
-                self.progress_bar.set(0.9)
+            # 4. Package and Save to 'bfs' folder
+            self.update_status("4/4: Packaging .bfs file...", "#00d4ff")
+            self.progress_bar.set(0.9)
 
-                # Save directly into the bfs folder
-                output_bfs = os.path.join("bfs", "generated_chart.bfs")
+            # Save directly into the bfs folder
+            output_bfs = os.path.join("bfs", "generated_chart.bfs")
 
-                with zipfile.ZipFile(output_bfs, 'w', zipfile.ZIP_DEFLATED) as zf:
-                    zf.writestr("chart.json", json.dumps(final_chart, indent=2))
-                    zf.write(audio_path, arcname="audio.mp3")
-                    if self.cover_path and os.path.exists(self.cover_path):
-                        with Image.open(self.cover_path) as img:
-                            img.save(os.path.join(temp_dir, "cover.webp"), format="WEBP")
-                        zf.write(os.path.join(temp_dir, "cover.webp"), arcname="cover.webp")
+            with zipfile.ZipFile(output_bfs, 'w', zipfile.ZIP_DEFLATED) as zf:
+                zf.writestr("chart.json", json.dumps(final_chart, indent=2))
+                zf.write(audio_path, arcname="audio.mp3")
+                if self.cover_path and os.path.exists(self.cover_path):
+                    with Image.open(self.cover_path) as img:
+                        img.save(os.path.join(temp_dir, "cover.webp"), format="WEBP")
+                    zf.write(os.path.join(temp_dir, "cover.webp"), arcname="cover.webp")
 
-                shutil.rmtree(temp_dir)
-                self.progress_bar.set(1.0)
-                self.update_status(f"✅ Success! Saved to {output_bfs}", "green")
+            shutil.rmtree(temp_dir)
+            self.progress_bar.set(1.0)
+            self.update_status(f"✅ Success! Saved to {output_bfs}", "green")
 
-            except Exception as e:
-                self.update_status(f"❌ Error: {str(e)}", "red")
-                if os.path.exists(temp_dir): shutil.rmtree(temp_dir)
-            finally:
-                self.generate_btn.configure(state="normal", text="🚀 Generate Chart")
+        except Exception as e:
+            self.update_status(f"❌ Error: {str(e)}", "red")
+            if os.path.exists(temp_dir): shutil.rmtree(temp_dir)
+        finally:
+            self.generate_btn.configure(state="normal", text="🚀 Generate Chart")
+
     def update_status(self, text, color):
         # Thread-safe UI update
         self.after(0, lambda: self.status_label.configure(text=text, text_color=color))
