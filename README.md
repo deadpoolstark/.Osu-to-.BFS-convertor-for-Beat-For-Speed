@@ -39,16 +39,8 @@ Because this uses a massive AI model, your PC needs to meet these requirements:
 ## ⏯️How to run:
  ▶️**run the following commands (based on what you want):**
    ```bash
-python app-V-Mapperatorinator.py
+python app.py
 ``` 
-for running it on Mapperatorinator(Osu->bsr conversion+1st run takes a while)
-   
-   **or**
-   
-   ```bash
-   python app-V-Librosa
-   ```
-   quick and dirty but quite accurate.
 ## 🤝 Credits & Acknowledgements
     
   **Mapperatorinator by OliBomby**: The incredible AI osu! beatmap generator that powers this tool.
