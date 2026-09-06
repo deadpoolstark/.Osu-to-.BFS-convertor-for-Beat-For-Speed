@@ -1,4 +1,4 @@
-gradio
+customtkinter
 yt-dlp
 librosa
 numpy
