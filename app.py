@@ -204,6 +204,19 @@ class BFSApp(ctk.CTk):
                 # 1b. Install its dependencies if we haven't already
                 req_marker = os.path.join("Mapperatorinator", ".deps_installed")
                 if not os.path.exists(req_marker):
+                    # Mapperatorinator's docs install torch/torchaudio as a SEPARATE
+                    # step from requirements.txt, since the right build depends on
+                    # your GPU/CUDA setup. Installing the CPU build here since it
+                    # works on any machine (slower inference, but always compatible).
+                    self.update_status("2/5: Installing PyTorch (CPU build)...", "#ffaa00")
+                    torch_result = subprocess.run(
+                        [mapper_python, "-m", "pip", "install", "torch", "torchaudio",
+                         "--index-url", "https://download.pytorch.org/whl/cpu"],
+                        capture_output=True, text=True
+                    )
+                    if torch_result.returncode != 0:
+                        raise Exception(f"PyTorch install failed:\n{torch_result.stderr}")
+
                     self.update_status("2/5: Installing Mapperatorinator dependencies (this can take a few minutes)...", "#ffaa00")
                     install_result = subprocess.run(
                         [mapper_python, "-m", "pip", "install", "-r", "Mapperatorinator/requirements.txt"],
