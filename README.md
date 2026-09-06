@@ -25,10 +25,10 @@ Because this uses a massive AI model, your PC needs to meet these requirements:
 1. **Clone this repository:**
    ```bash
    git clone https://github.com/deadpoolstark3/BFS-Generator.git
-   cd BFS-Generator```
+   cd BFS-Generator
 2. **Install the base requirements:**
     ```bash
-    pip install -r requirements.txt```
+    pip install -r requirements.txt
 
 ## 🛠️ Troubleshooting & Support
 
