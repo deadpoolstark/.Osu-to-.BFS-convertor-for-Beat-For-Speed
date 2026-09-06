@@ -111,6 +111,48 @@ class BFSApp(ctk.CTk):
         thread = threading.Thread(target=self.run_pipeline, args=(url,))
         thread.start()
 
+    def get_mapperator_python(self):
+        """
+        Returns the path to a real, isolated Python 3.10 interpreter that
+        Mapperatorinator can run under, independent of whatever Python this app
+        itself is running on.
+
+        Uses 'uv' (a small standalone Python version/venv manager) to download a
+        proper, verified Python 3.10 build and create a venv from it. No admin
+        rights needed. Much more robust than hand-patching an embeddable build,
+        which can silently corrupt itself once packages get installed into it.
+        """
+        venv_dir = os.path.abspath("mapperator_venv")
+        venv_python = os.path.join(venv_dir, "Scripts", "python.exe")
+
+        if os.path.exists(venv_python):
+            return venv_python
+
+        # 1. Make sure 'uv' itself is available. It's a plain console-script
+        # tool (not a compiled extension tied to a specific Python's ABI), so
+        # it installs cleanly regardless of which Python this app is running on.
+        uv_check = subprocess.run([sys.executable, "-m", "uv", "--version"], capture_output=True, text=True)
+        if uv_check.returncode != 0:
+            self.update_status("2/5: Installing environment manager (uv)...", "#ffaa00")
+            install_uv = subprocess.run([sys.executable, "-m", "pip", "install", "uv"], capture_output=True, text=True)
+            if install_uv.returncode != 0:
+                raise Exception(f"Failed to install 'uv':\n{install_uv.stderr}")
+
+        # 2. Have uv download a real, verified Python 3.10 build and create a
+        # proper venv from it (--seed includes pip, setuptools, wheel).
+        self.update_status("2/5: Downloading isolated Python 3.10 (one-time setup)...", "#ffaa00")
+        venv_result = subprocess.run(
+            [sys.executable, "-m", "uv", "venv", "--python", "3.10", "--seed", venv_dir],
+            capture_output=True, text=True
+        )
+        if venv_result.returncode != 0:
+            raise Exception(f"Failed to set up isolated Python 3.10:\n{venv_result.stderr}")
+
+        if not os.path.exists(venv_python):
+            raise Exception("Isolated Python 3.10 setup finished but python.exe was not found where expected.")
+
+        return venv_python
+
     def run_pipeline(self, url):
         temp_dir = "temp_app_data"
         os.makedirs(temp_dir, exist_ok=True)
@@ -143,21 +185,53 @@ class BFSApp(ctk.CTk):
                 self.update_status("2/5: Setting up Heavy AI (This may take a while)...", "#ffaa00")
                 self.progress_bar.set(0.2)
 
+                # Mapperatorinator needs Python 3.10 specifically. Rather than relying on
+                # whatever Python this app itself is running under, download a fully
+                # isolated, self-contained Python 3.10 (no installer, no admin rights
+                # needed) and run everything Mapperatorinator-related through that.
+                mapper_python = self.get_mapperator_python()
+
                 # 1. Clone if missing
                 if not os.path.exists("Mapperatorinator"):
-                    subprocess.run(["git", "clone", "https://github.com/OliBomby/Mapperatorinator.git"], check=True, capture_output=True)
+                    self.update_status("2/5: Cloning Mapperatorinator repo...", "#ffaa00")
+                    clone_result = subprocess.run(
+                        ["git", "clone", "https://github.com/OliBomby/Mapperatorinator.git"],
+                        capture_output=True, text=True
+                    )
+                    if clone_result.returncode != 0:
+                        raise Exception(f"Git clone failed:\n{clone_result.stderr}")
+
+                # 1b. Install its dependencies if we haven't already
+                req_marker = os.path.join("Mapperatorinator", ".deps_installed")
+                if not os.path.exists(req_marker):
+                    self.update_status("2/5: Installing Mapperatorinator dependencies (this can take a few minutes)...", "#ffaa00")
+                    install_result = subprocess.run(
+                        [mapper_python, "-m", "pip", "install", "-r", "Mapperatorinator/requirements.txt"],
+                        capture_output=True, text=True
+                    )
+                    if install_result.returncode != 0:
+                        raise Exception(f"Dependency install failed:\n{install_result.stderr}")
+                    # Mark as done so we don't reinstall every single run
+                    with open(req_marker, "w") as f:
+                        f.write("ok")
 
                 # 2. Run Inference
                 self.update_status("2/5: Running Mapperatorinator AI...", "#ffaa00")
+                # inference.py loads its config files (e.g. configs/inference/default.yaml)
+                # using paths relative to its OWN folder, so it must be run with that
+                # folder as the working directory. Absolute paths for audio/output so
+                # they still resolve correctly once the working directory changes.
                 cmd = [
-                    sys.executable, "Mapperatorinator/inference.py",
-                    f"audio_path={audio_path}",
-                    f"output_path={temp_dir}",
+                    mapper_python, "inference.py",
+                    f"audio_path={os.path.abspath(audio_path)}",
+                    f"output_path={os.path.abspath(temp_dir)}",
                     "gamemode=3", "keycount=5", "difficulty=5"
                 ]
-                result = subprocess.run(cmd, capture_output=True, text=True)
+                result = subprocess.run(cmd, capture_output=True, text=True, cwd=os.path.abspath("Mapperatorinator"))
                 if result.returncode != 0:
-                    raise Exception(f"AI crashed. Check console. Error: {result.stderr[:100]}")
+                    print(result.stderr)  # full traceback goes to your actual terminal/console
+                    last_line = result.stderr.strip().splitlines()[-1] if result.stderr.strip() else "unknown error"
+                    raise Exception(f"AI crashed. Check console for full traceback. Error: {last_line}")
 
                 osu_path = next((f for f in os.listdir(temp_dir) if f.endswith('.osu')), None)
                 if not osu_path: raise Exception("AI didn't output an .osu file.")
@@ -249,7 +323,10 @@ class BFSApp(ctk.CTk):
             self.update_status(f"✅ Success! Saved to {output_bfs}", "green")
 
         except Exception as e:
-            self.update_status(f"❌ Error: {str(e)}", "red")
+            import traceback
+            traceback.print_exc()  # full traceback always goes to console now
+            error_text = str(e) if str(e) else type(e).__name__
+            self.update_status(f"❌ Error: {error_text} (see console for details)", "red")
             if os.path.exists(temp_dir): shutil.rmtree(temp_dir)
         finally:
             self.generate_btn.configure(state="normal", text="🚀 Generate Chart")
