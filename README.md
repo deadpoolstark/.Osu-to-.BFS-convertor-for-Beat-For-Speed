@@ -25,7 +25,7 @@ A desktop tool that turns any YouTube song into a playable **Beat For Speed (.bf
 ```bash
 git clone https://github.com/deadpoolstark/Better-.BFS-Generator-for-Beat-For-Speed
 cd bfs-ai-chart-generator
-pip install customtkinter yt-dlp librosa numpy pillow
+pip install -r requirements.txt
 python app.py
 ```
 
