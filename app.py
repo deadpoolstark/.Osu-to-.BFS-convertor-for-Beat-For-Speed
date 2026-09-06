@@ -1,147 +1,177 @@
-import gradio as gr
-import yt_dlp
-import subprocess
+import customtkinter as ctk
+import tkinter as tk
+from tkinter import filedialog
+import threading
 import os
 import json
 import zipfile
 import shutil
 import random
+import yt_dlp
+import librosa
+import numpy as np
+from PIL import Image
 
-# --- HELPER: Parse the generated .osu file ---
-def parse_osu_file(osu_path):
-    bpm = 120.0
-    hit_objects = []
-    in_timing, in_objects = False, False
-    with open(osu_path, 'r', encoding='utf-8') as f:
-        for line in f:
-            line = line.strip()
-            if line == "[TimingPoints]": in_timing, in_objects = True, False
-            elif line == "[HitObjects]": in_timing, in_objects = False, True
-            elif line.startswith("["): in_timing, in_objects = False, False
-            if in_timing and line and not line.startswith("//"):
-                parts = line.split(',')
-                if len(parts) >= 2 and float(parts[0]) == 0.0:
-                    ms_per_beat = float(parts[1])
-                    if ms_per_beat > 0: bpm = 60000.0 / ms_per_beat
-            if in_objects and line and not line.startswith("//"):
-                parts = line.split(',')
-                if len(parts) >= 3:
-                    hit_objects.append({"x": int(parts[0]), "time_ms": int(parts[2])})
-    return bpm, hit_objects
+# --- APP SETTINGS ---
+ctk.set_appearance_mode("dark")
+ctk.set_default_color_theme("green") # Blue, Green, Dark-Blue
 
-# --- MAIN PIPELINE ---
-def generate_chart(youtube_url):
-    temp_dir = "temp_process"
-    os.makedirs(temp_dir, exist_ok=True)
+class BFSApp(ctk.CTk):
+    def __init__(self):
+        super().__init__()
 
-    try:
-        # 1. Download Audio
-        gr.Info("Downloading audio from YouTube... (This may take 1-2 mins)")
-        ydl_opts = {
-            'format': 'bestaudio/best',
-            'outtmpl': f'{temp_dir}/audio.%(ext)s',
-            'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '192'}],
-        }
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([youtube_url])
+        # Window Setup
+        self.title("Beat For Speed AI Chart Generator")
+        self.geometry("700x600")
+        self.resizable(False, False)
 
-        audio_path = next((f for f in os.listdir(temp_dir) if f.endswith('.mp3')), None)
-        if not audio_path:
-            return None, "Failed to download audio."
-        audio_path = os.path.join(temp_dir, audio_path)
+        # Main Layout
+        self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(4, weight=1)
 
-        # 2. Run Mapperatorinator AI
-        gr.Info("Running AI to generate .osu map... (Please wait)")
-        osu_output = os.path.join(temp_dir, "ai_map.osu")
-        cmd = [
-            "python", "Mapperatorinator/inference.py",
-            f"audio_path={audio_path}",
-            f"output_path={temp_dir}",
-            "gamemode=3", "keycount=5", "difficulty=5"
-        ]
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        # Title
+        self.title_label = ctk.CTkLabel(self, text="🏍️ BFS AI Chart Generator", font=ctk.CTkFont(size=28, weight="bold"))
+        self.title_label.grid(row=0, column=0, pady=(30, 10), padx=20)
 
-        osu_path = next((f for f in os.listdir(temp_dir) if f.endswith('.osu')), None)
-        if not osu_path:
-            return None, "AI generation failed. Check console logs."
-        osu_path = os.path.join(temp_dir, osu_path)
+        # YouTube URL Input
+        self.url_label = ctk.CTkLabel(self, text="YouTube URL:", anchor="w")
+        self.url_label.grid(row=1, column=0, pady=(10, 0), padx=40, sticky="w")
 
-        # 3. Convert .osu to .bfs (Using our smart logic)
-        gr.Info("Converting to Beat For Speed format with smart obstacles...")
-        bpm, objects = parse_osu_file(osu_path)
+        self.url_entry = ctk.CTkEntry(self, placeholder_text="https://www.youtube.com/watch?v=...", width=620)
+        self.url_entry.grid(row=2, column=0, pady=10, padx=40)
 
-        entities = [{"beat": 0.0, "key": 5, "datamodel": "custom_song_structure_gameplay/g00_s00_intro", "width": 0.25, "volume": 100}]
+        # Cover Image Input
+        self.cover_label = ctk.CTkLabel(self, text="Cover Image (Optional):", anchor="w")
+        self.cover_label.grid(row=3, column=0, pady=(10, 0), padx=40, sticky="w")
 
-        for obj in objects:
-            beat = (obj["time_ms"] / 1000.0) / (60.0 / bpm)
-            lane_index = max(0, min(4, int(obj["x"] / 102.4)))
-            entities.append({"beat": round(beat, 4), "key": 5 + lane_index, "datamodel": "custom_custom_spawn_cube/spawn_cube", "width": 0.25, "volume": 100})
+        self.cover_btn = ctk.CTkButton(self, text="Select Image", command=self.select_cover, width=150)
+        self.cover_btn.grid(row=3, column=0, pady=10, padx=40, sticky="e")
+        self.cover_path = ""
 
-        # Add max 15 smart obstacles
-        time_gaps = [objects[i]["time_ms"] - objects[i-1]["time_ms"] for i in range(1, len(objects))]
-        avg_gap = sum(time_gaps) / len(time_gaps) if time_gaps else 500
+        # Generate Button
+        self.generate_btn = ctk.CTkButton(self, text="🚀 Generate Chart", command=self.start_generation, font=ctk.CTkFont(size=16, weight="bold"), height=50)
+        self.generate_btn.grid(row=4, column=0, pady=30, padx=40)
 
-        intense_moments = []
-        for i, obj in enumerate(objects):
-            if obj["time_ms"] > 5000 and i > 0:
-                current_gap = obj["time_ms"] - objects[i-1]["time_ms"]
-                if 0 < current_gap < (avg_gap * 0.7):
-                    intense_moments.append({"beat": (obj["time_ms"] / 1000.0) / (60.0 / bpm), "intensity": avg_gap / current_gap})
+        # Progress Bar
+        self.progress_bar = ctk.CTkProgressBar(self, width=620)
+        self.progress_bar.grid(row=5, column=0, pady=10, padx=40)
+        self.progress_bar.set(0)
 
-        intense_moments.sort(key=lambda x: x["intensity"], reverse=True)
-        for moment in intense_moments[:15]:
-            entities.append({"beat": round(moment["beat"], 4), "key": random.randint(5, 9), "datamodel": "custom_custom_spawn_cube/spawn_sting", "width": 0.25, "volume": 100})
+        # Status Log
+        self.status_label = ctk.CTkLabel(self, text="Ready to generate.", text_color="gray")
+        self.status_label.grid(row=6, column=0, pady=(0, 30), padx=40)
 
-        # Add Themes & End
-        last_beat = (objects[-1]["time_ms"] / 1000.0) / (60.0 / bpm) if objects else 100
-        entities.append({"beat": 0.0, "key": 1, "datamodel": "custom_themes/city_cold_night_theme", "width": 0.25, "volume": 100})
-        entities.append({"beat": round(last_beat, 4), "key": 5, "datamodel": "custom_song_structure_gameplay/end", "width": 0.25, "volume": 100})
-        entities.sort(key=lambda x: x["beat"])
+    def select_cover(self):
+        filepath = filedialog.askopenfilename(filetypes=[("Image Files", "*.jpg *.png *.webp")])
+        if filepath:
+            self.cover_path = filepath
+            self.cover_btn.configure(text=os.path.basename(filepath), fg_color="green")
 
-        final_chart = {
-            "musicData": {"filename": "", "bpm": round(bpm, 2), "runBeats": 0.0},
-            "entities": entities,
-            "editorMeta": {"axisMap": [1,0,0,0,0,0,0,0,0,0], "datamodelTypes": [], "songStructure": {"version": "v2", "mode": "gameplay_compact", "source": "YT_AI_Pipeline"}},
-            "bfsMetadata": {"songName": "YT AI Gen", "artist": "Unknown", "author": "Auto", "difficulty": "Medium", "genre": "AI", "description": f"Generated from {youtube_url}", "coverFileName": "cover.webp"}
-        }
+    def start_generation(self):
+        url = self.url_entry.get()
+        if not url:
+            self.update_status("Please enter a YouTube URL!", "red")
+            return
 
-        # 4. Package and Return
-        output_bfs = os.path.join(temp_dir, "final_chart.bfs")
-        with zipfile.ZipFile(output_bfs, 'w', zipfile.ZIP_DEFLATED) as zf:
-            zf.writestr("chart.json", json.dumps(final_chart, indent=2))
-            zf.write(audio_path, arcname="audio.mp3")
-            # Create a dummy cover if you don't have one
-            with open("dummy_cover.webp", "wb") as f: pass # Placeholder
-            if os.path.exists("dummy_cover.webp"):
-                zf.write("dummy_cover.webp", arcname="cover.webp")
+        self.generate_btn.configure(state="disabled", text="Processing...")
+        self.progress_bar.set(0)
 
-        # Cleanup
-        shutil.rmtree(temp_dir)
-        gr.Info("✅ Success! Downloading your .bfs file.")
-        return output_bfs, "Chart generated successfully!"
+        # Run in background thread so UI doesn't freeze
+        thread = threading.Thread(target=self.run_pipeline, args=(url,))
+        thread.start()
 
-    except Exception as e:
-        if os.path.exists(temp_dir): shutil.rmtree(temp_dir)
-        return None, f"Error: {str(e)}"
+        def run_pipeline(self, url):
+            temp_dir = "temp_app_data"
+            os.makedirs(temp_dir, exist_ok=True)
 
-# --- GRADIO UI ---
-with gr.Blocks(theme=gr.themes.Soft(primary_hue="blue")) as demo:
-    gr.Markdown("# 🏍️ YouTube to Beat For Speed AI Converter")
-    gr.Markdown("Paste a YouTube link. The server will download the audio, run the Mapperatorinator AI, add 15 smart obstacles, and give you a ready-to-play `.bfs` file.")
+            # Create the 'bfs' folder to store the final files
+            os.makedirs("bfs", exist_ok=True)
 
-    with gr.Row():
-        with gr.Column():
-            yt_input = gr.Textbox(label="YouTube URL", placeholder="https://www.youtube.com/watch?v=...")
-            submit_btn = gr.Button("🚀 Generate Chart", variant="primary")
-        with gr.Column():
-            status_output = gr.Textbox(label="Status", interactive=False)
-            file_output = gr.File(label="Download .bfs Chart")
+            try:
+                # 1. Download
+                self.update_status("1/4: Downloading audio from YouTube...", "#00d4ff")
+                self.progress_bar.set(0.1)
 
-    submit_btn.click(
-        fn=generate_chart,
-        inputs=[yt_input],
-        outputs=[file_output, status_output]
-    )
+                ydl_opts = {
+                    'format': 'bestaudio/best',
+                    'outtmpl': f'{temp_dir}/audio.%(ext)s',
+                    'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '192'}],
+                }
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    ydl.download([url])
+
+                audio_path = next((f for f in os.listdir(temp_dir) if f.endswith('.mp3')), None)
+                if not audio_path: raise Exception("Audio download failed.")
+                audio_path = os.path.join(temp_dir, audio_path)
+
+                # 2. AI Generation (Lightweight Librosa)
+                self.update_status("2/4: Analyzing audio & generating AI notes...", "#00d4ff")
+                self.progress_bar.set(0.4)
+
+                y, sr = librosa.load(audio_path, sr=22050)
+                tempo, _ = librosa.beat.beat_track(y=y, sr=sr)
+                bpm = float(np.array(tempo).flatten()[0])
+                onset_frames = librosa.onset.onset_detect(y=y, sr=sr, backtrack=True)
+                onset_times = librosa.frames_to_time(onset_frames, sr=sr)
+                onset_beats = (onset_times / 60.0) * bpm
+
+                # 3. Build Chart & Obstacles
+                self.update_status("3/4: Adding smart obstacles & themes...", "#00d4ff")
+                self.progress_bar.set(0.7)
+
+                entities = [{"beat": 0.0, "key": 5, "datamodel": "custom_song_structure_gameplay/g00_s00_intro", "width": 0.25, "volume": 100}]
+                for beat in onset_beats:
+                    humanized_beat = round(float(beat) + np.random.uniform(-0.02, 0.02), 4)
+                    chosen_key = int(np.random.choice([5, 6, 7, 8, 9]))
+                    entities.append({"beat": humanized_beat, "key": chosen_key, "datamodel": "custom_custom_spawn_cube/spawn_cube", "width": 0.25, "volume": 100})
+
+                # Add 15 smart obstacles
+                time_gaps = [onset_beats[i] - onset_beats[i-1] for i in range(1, len(onset_beats))]
+                avg_gap = sum(time_gaps) / len(time_gaps) if time_gaps else 1
+                intense = [{"beat": onset_beats[i], "intensity": avg_gap / (onset_beats[i] - onset_beats[i-1])} for i in range(1, len(onset_beats)) if (onset_beats[i] - onset_beats[i-1]) < (avg_gap * 0.7)]
+                intense.sort(key=lambda x: x["intensity"], reverse=True)
+                for moment in intense[:15]:
+                    entities.append({"beat": round(moment["beat"], 4), "key": random.randint(5, 9), "datamodel": "custom_custom_spawn_cube/spawn_sting", "width": 0.25, "volume": 100})
+
+                last_beat = max(onset_beats) if len(onset_beats) > 0 else 100
+                entities.append({"beat": round(last_beat, 4), "key": 5, "datamodel": "custom_song_structure_gameplay/end", "width": 0.25, "volume": 100})
+                entities.sort(key=lambda x: x["beat"])
+
+                final_chart = {
+                    "musicData": {"filename": "", "bpm": round(bpm, 2), "runBeats": 0.0},
+                    "entities": entities,
+                    "editorMeta": {"axisMap": [1,0,0,0,0,0,0,0,0,0], "datamodelTypes": [], "songStructure": {"version": "v2", "mode": "gameplay_compact", "source": "Local_App"}},
+                    "bfsMetadata": {"songName": "Local Gen", "artist": "Unknown", "author": "Local", "difficulty": "Medium", "genre": "AI", "description": f"Generated from {url}", "coverFileName": "cover.webp"}
+                }
+
+                # 4. Package and Save to 'bfs' folder
+                self.update_status("4/4: Packaging .bfs file...", "#00d4ff")
+                self.progress_bar.set(0.9)
+
+                # Save directly into the bfs folder
+                output_bfs = os.path.join("bfs", "generated_chart.bfs")
+
+                with zipfile.ZipFile(output_bfs, 'w', zipfile.ZIP_DEFLATED) as zf:
+                    zf.writestr("chart.json", json.dumps(final_chart, indent=2))
+                    zf.write(audio_path, arcname="audio.mp3")
+                    if self.cover_path and os.path.exists(self.cover_path):
+                        with Image.open(self.cover_path) as img:
+                            img.save(os.path.join(temp_dir, "cover.webp"), format="WEBP")
+                        zf.write(os.path.join(temp_dir, "cover.webp"), arcname="cover.webp")
+
+                shutil.rmtree(temp_dir)
+                self.progress_bar.set(1.0)
+                self.update_status(f"✅ Success! Saved to {output_bfs}", "green")
+
+            except Exception as e:
+                self.update_status(f"❌ Error: {str(e)}", "red")
+                if os.path.exists(temp_dir): shutil.rmtree(temp_dir)
+            finally:
+                self.generate_btn.configure(state="normal", text="🚀 Generate Chart")
+    def update_status(self, text, color):
+        # Thread-safe UI update
+        self.after(0, lambda: self.status_label.configure(text=text, text_color=color))
 
 if __name__ == "__main__":
-    demo.launch(server_name="0.0.0.0", server_port=7860)
+    app = BFSApp()
+    app.mainloop()

@@ -2,3 +2,4 @@ gradio
 yt-dlp
 librosa
 numpy
+Pillow
